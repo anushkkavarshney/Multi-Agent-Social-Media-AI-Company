@@ -1,0 +1,27 @@
+[project]
+name = "prodigal-task1"
+version = "0.1.0"
+description = "Multi-agent social media AI company on local models (Ollama) — Prodigal AI Task 1"
+readme = "README.md"
+requires-python = ">=3.10"   # doc target is 3.11+; built/verified on 3.10.11 (see SETUP_LOG.md)
+license = { text = "MIT" }
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+# The top-level packages from the architecture doc's repo layout (section 3).
+include = ["config*", "models*", "llm*", "agents*", "orchestration*", "platform*", "memory*", "cli*", "scripts*", "tests*"]
+
+# `platform` shadows the stdlib module of the same name. This app is always run
+# from the repo root (`python -m platform.main`), so the local package wins via
+# sys.path[0]. The probe in SETUP_LOG.md verifies this explicitly.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.setuptools.package-data]
+llm = ["prompts/*.jinja", "prompts/*.txt"]

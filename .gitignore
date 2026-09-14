@@ -1,0 +1,28 @@
+# Byte-compile / cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environment
+.venv/
+venv/
+
+# Runtime artifacts (regenerated; never commit)
+logs/
+*.log
+platform.db
+platform.db-journal
+*.db-shm
+*.db-wal
+
+# Secrets / local overrides (the checked-in template is .env.example)
+.env
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+# OS noise
+Thumbs.db
+.DS_Store
