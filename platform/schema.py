@@ -128,3 +128,28 @@ class SimulationState(Base):
     format_history_json: Mapped[dict] = mapped_column(JSON, default=dict)
     # Latest multipliers per post, kept for observability/debugging.
     last_multipliers_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class MessageBusRecord(Base):
+    """Durable log of every agent-to-agent message (Day 2, doc section 7).
+
+    Append-only by convention: the API never updates or deletes rows — the
+    agent conversation must survive a restart and be replayable for the
+    write-up. Mirrored to logs/agent_trace.jsonl by the bus for the
+    human-readable trace; SQLite is the source of truth.
+
+    `seq` (autoincrement) is the global order; `message_id` is the stable uuid
+    used by bus consumers. `campaign_id` is indexed because every read path
+    (history(campaign_id)) filters on it.
+    """
+
+    __tablename__ = "message_bus"
+
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    message_id: Mapped[str] = mapped_column(String(64), unique=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_utc)
+    from_agent: Mapped[str] = mapped_column(String(64))
+    to_agent: Mapped[str] = mapped_column(String(64), index=True)
+    campaign_id: Mapped[str] = mapped_column(String(64), index=True)
+    message_type: Mapped[str] = mapped_column(String(64))
+    payload_json: Mapped[dict] = mapped_column(JSON)

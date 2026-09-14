@@ -18,6 +18,9 @@ pydantic==2.10.4
 pydantic-settings==2.7.0
 python-dotenv==1.0.1
 
+# --- Prompt templates (agents/render via llm/prompts/*.jinja) ---
+jinja2==3.1.5
+
 # --- HTTP client (Ollama API + tests) ---
 httpx==0.28.1
 

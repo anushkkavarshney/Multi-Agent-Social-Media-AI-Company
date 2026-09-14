@@ -22,6 +22,12 @@ include = ["config*", "models*", "llm*", "agents*", "orchestration*", "platform*
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    # The doc's contract names a Post field `copy`, which shadows pydantic-2's
+    # deprecated BaseModel.copy() — we never call .copy() (we use model_copy),
+    # so this exact warning is noise. Scoped narrowly on purpose.
+    "ignore:Field name \"copy\" in .*shadows an attribute in parent:UserWarning",
+]
 
 [tool.setuptools.package-data]
 llm = ["prompts/*.jinja", "prompts/*.txt"]

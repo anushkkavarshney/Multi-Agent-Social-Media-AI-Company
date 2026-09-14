@@ -81,12 +81,16 @@ class Post(BaseModel):
 
     @model_validator(mode="after")
     def rejection_count_consistent(self) -> "Post":
-        # A rejected post must have been rejected at least once; conversely a
-        # post with rejections on record cannot still be "pending".
+        # A rejected post must have been rejected at least once.
+        # NOTE (Day 2 change): the original draft of this validator ALSO
+        # rejected "rejection_count > 0 with status='pending'", assuming a
+        # rejection was terminal per post. The reject loop (doc section 7)
+        # makes revision-then-resubmission the NORMAL path: a revised post
+        # re-enters review as 'pending' with its rejection history intact —
+        # that history is exactly what the retry policy counts. Only the
+        # impossible direction (rejected with count 0) stays forbidden.
         if self.compliance_status == "rejected" and self.rejection_count < 1:
             raise ValueError("compliance_status='rejected' requires rejection_count >= 1")
-        if self.rejection_count > 0 and self.compliance_status == "pending":
-            raise ValueError("rejection_count > 0 is inconsistent with compliance_status='pending'")
         return self
 
 

@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     # "max 3 attempts, then fall back / fail loudly").
     max_structured_retries: int = 3
 
+    # --- Compliance reject loop ---------------------------------------------
+    # Max times Compliance may reject a post and send it back to the Writer
+    # before the loop escalates to needs_human (doc section 7: "Max 3 rejection
+    # cycles per post -> auto-escalate to human queue"). Owned by
+    # orchestration/retry_policy.py; mirrored here so .env can re-tune it.
+    max_compliance_retries: int = 3
+
     # --- Mock platform -------------------------------------------------------
     db_path: str = "./platform.db"
     create_tables_on_startup: bool = True

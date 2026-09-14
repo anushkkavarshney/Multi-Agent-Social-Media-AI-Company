@@ -16,9 +16,23 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-# Valid campaign lifecycle states (state machine lives in orchestration/,
-# Day 2 — this Literal is the contract the state machine must respect).
-CampaignStatus = Literal["draft", "pending_human_approval", "approved", "running", "reviewed"]
+# Campaign lifecycle states — the exact set from architecture doc section 8.
+# MUST stay in sync with the transition table in orchestration/state_machine.py,
+# which is the runtime source of truth; this Literal is the contract layer that
+# validates Campaign.status against it. NOTE: expanded on Day 2 from the
+# original 5-state draft to the full doc lifecycle (see SETUP_LOG.md).
+CampaignStatus = Literal[
+    "draft",                   # brief parsed; Strategy not yet run
+    "strategy_filled",         # audience/channels/pillars/KPIs populated
+    "content_drafted",         # Writer produced Post drafts
+    "compliance_review",       # posts in Compliance review (incl. reject loops)
+    "needs_human",             # compliance loop exhausted (3 rejections) or escalated
+    "pending_human_approval",  # compliance-approved; awaiting the human gate
+    "scheduled",               # human approved; Scheduler assigned publish slots
+    "published",               # posts live on the mock platform
+    "simulating",              # engagement accruing under the hidden rules
+    "week_reviewed",           # WeeklyReport produced; recommendations feed week 2
+]
 
 
 class KPISet(BaseModel):
@@ -78,8 +92,13 @@ class Campaign(BaseModel):
     target_audience: str
     channel_mix: list[str] = Field(..., min_length=1, description="Channel ids/names the campaign runs on.")
     duration_days: int = Field(..., gt=0, description="Campaign length in days.")
-    content_pillars: list[ContentPillar] = Field(..., min_length=1)
-    kpis: list[KPISet] = Field(..., min_length=1)
+    # Default empty (NOT min_length=1): the ORCHESTRATOR's draft Campaign
+    # legitimately has no pillars/KPIs yet — the Strategy Agent fills them in
+    # the strategy_filled step. Enforced below per-status instead of at the
+    # field level, so a non-draft Campaign still cannot ship without them.
+    # (Day 2 contract change from min_length=1; see SETUP_LOG.md.)
+    content_pillars: list[ContentPillar] = Field(default_factory=list)
+    kpis: list[KPISet] = Field(default_factory=list)
     status: CampaignStatus = "draft"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -91,10 +110,34 @@ class Campaign(BaseModel):
         return [c.strip() for c in v]
 
     @model_validator(mode="after")
+    def strategy_fields_required_once_out_of_draft(self) -> "Campaign":
+        # A `draft` Campaign is the Orchestrator's raw parse: pillars/KPIs are
+        # the STRATEGY AGENT's output and arrive later. Any later state means
+        # Strategy has run, so they must exist — this keeps the empty-list
+        # allowance above from leaking into the filled stages.
+        if self.status != "draft":
+            missing = []
+            if not self.content_pillars:
+                missing.append("content_pillars")
+            if not self.kpis:
+                missing.append("kpis")
+            if missing:
+                raise ValueError(
+                    f"a {self.status!r} campaign must have {missing} "
+                    "(the Strategy Agent fills these before leaving draft)"
+                )
+        return self
+
+    @model_validator(mode="after")
     def pillar_weights_sum_to_one(self) -> "Campaign":
         # Weights are share-of-voice: the Writer Agent uses them to allocate
         # posts, so a sum != 1.0 silently skews the calendar. Fail at the
         # boundary (floating point tolerated within 1e-6).
+        # Empty pillars skip this check: a draft Campaign has none yet (the
+        # Strategy Agent adds them), and an empty list must not masquerade as
+        # a weighting error.
+        if not self.content_pillars:
+            return self
         total = sum(p.weight for p in self.content_pillars)
         if abs(total - 1.0) > 1e-6:
             raise ValueError(

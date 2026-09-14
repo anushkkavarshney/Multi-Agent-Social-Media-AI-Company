@@ -141,3 +141,105 @@ Run it after installing; append the output below.
   accrue with `exposure_fraction` (verified 0.674 live).
 - **comment generation:** pools drawn via per-pool permutations so identical
   templates never repeat back-to-back.
+
+---
+
+## Day 2 — 2026-09-15 (agents, orchestration, reject loop end-to-end)
+
+Built doc build-order steps 6-8: message bus, state machine, retry policy,
+base agent, all 8 agents, and the compliance reject loop wired end to end.
+Nothing publishes (Day 3).
+
+### 1. Dependencies (one new pin)
+
+```bash
+.venv/Scripts/python.exe -m pip install jinja2==3.1.5
+# (requirements.txt updated; a fresh venv gets it from requirements.txt)
+```
+
+### 2. Run the full test suite (Day 1 + Day 2 tests)
+
+```bash
+.venv/Scripts/python.exe -m pytest tests/ -v
+# Day-2 result: 63 passed in 8.5s (was 27 after Day 1; +36 new)
+```
+
+### 3. Run the Day-2 dry run (needs Ollama running)
+
+```bash
+# Ollama must be up (see Day 1 section 7 for install/pull commands):
+curl http://localhost:11434/api/tags
+
+# Full dry run with the interactive human gate:
+.venv/Scripts/python.exe scripts/run_day2_dryrun.py
+
+# Or headless (auto-approves at the human gate):
+.venv/Scripts/python.exe scripts/run_day2_dryrun.py --auto-approve
+```
+
+What you should see: 7 stages printed (orchestrator -> strategy -> writer
+3-pass -> creative -> compliance with 1 forced rejection + revision ->
+human gate -> scheduler slots), then the per-campaign bus history summary.
+The forced rejection: a banned phrase is injected into post 1's first
+review; the rule prefilter rejects WITHOUT a model call; the Writer revises
+with the verdict's reasons verbatim; re-review approves. If the injected
+phrase ever survives, the script aborts itself (never ships a banned post).
+
+When Ollama is down, the script exits 2 with install/start/pull/verify
+instructions (verified — that is the specified graceful failure).
+
+### 4. Inspect the agent conversation (the deliverable)
+
+```bash
+# The full conversation, chronologically interleaved:
+cat logs/agent_trace.jsonl
+
+# Just the bus handoffs:
+grep '"event": "bus_message"' logs/agent_trace.jsonl | python -m json.tool --json-lines
+
+# Just the rejection cycles (write-up gold):
+grep -E '"message_type": "(compliance_verdict|posts_rejected)"' logs/agent_trace.jsonl
+```
+
+The bus ALSO persists every message to the `message_bus` table in
+platform.db (survives restarts; replayable):
+
+```bash
+.venv/Scripts/python.exe -c "import asyncio; from orchestration.message_bus import MessageBus; print(asyncio.run(MessageBus().count()))"
+```
+
+### 5. Quick component spot-checks (all offline, no Ollama)
+
+```bash
+# State machine: legal walk + illegal transition error
+.venv/Scripts/python.exe -m pytest tests/test_state_machine.py -v
+
+# Bounded retry policy (the infinite-loop prevention)
+.venv/Scripts/python.exe -m pytest tests/test_retry_policy.py -v
+
+# Message bus durability (restart survival)
+.venv/Scripts/python.exe -m pytest tests/test_message_bus.py -v
+
+# All agents offline via scripted transports (no daemon needed)
+.venv/Scripts/python.exe -m pytest tests/test_agents_offline.py -v
+```
+
+### Day-2 notes for the write-up (captured live, not reconstructed)
+
+- **State machine fidelity fix:** the doc draws `content_drafted ->
+  compliance_review` as an edge, with rejections returning from
+  `compliance_review`. First draft had reject events fired from
+  content_drafted; corrected to match the doc exactly, with
+  `compliance_review` a re-entered ACTIVITY state.
+- **Contract sync:** `models/campaign.py::CampaignStatus` expanded from the
+  5-state Day-1 draft to the doc §8 lifecycle (10 states) — the state
+  machine is the runtime source of truth; the Literal mirrors it.
+- **Reject-loop accounting:** `Post`'s "pending with rejection history"
+  state is now legal (validator relaxed) — a revised post re-enters review
+  with `rejection_count` intact; that count is what the retry policy counts.
+- **Hard-rule short-circuit:** a hard banned-term hit rejects with NO model
+  call — "don't rely on the LLM alone for hard constraints" enforced both
+  by priority and by saving the latency.
+- **Two-stage analytics proven offline:** `kpi_performance` in the
+  WeeklyReport is computed by Python; the model narrates and literally
+  cannot write numbers into the KPI table (schema separation).

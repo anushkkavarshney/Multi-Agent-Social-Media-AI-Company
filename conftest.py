@@ -28,3 +28,8 @@ assert hasattr(_local_platform, "__path__"), (
     "conftest failed: sys.modules['platform'] is not the local package — "
     "tests cannot import platform.* submodules"
 )
+
+# NOTE: the pydantic "Field name 'copy' shadows BaseModel.copy" UserWarning
+# is silenced precisely in pyproject.toml [tool.pytest.ini_options]
+# filterwarnings — pytest manages warning filters itself around test phases,
+# so a conftest-level filterwarnings() call does not stick.
