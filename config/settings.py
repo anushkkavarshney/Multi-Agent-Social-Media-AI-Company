@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     primary_model: str = "qwen2.5:7b-instruct"
     router_model: str = "qwen2.5:3b-instruct"
     embedding_model: str = "nomic-embed-text"
+    # HTTP read timeout for the Ollama client. 600s because on CPU-only hosts
+    # the FIRST call for a model can spend minutes loading weights into RAM
+    # before the first token arrives (7B ≈ 4.7 GB). If this times out you'll
+    # see OllamaConnectionError wrapping httpx.ReadTimeout — raise it here.
+    ollama_timeout_seconds: float = 600.0
 
     # --- Structured-output retry policy -------------------------------------
     # Number of *total* attempts before raising ModelOutputFailure (doc section 9:

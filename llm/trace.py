@@ -63,6 +63,8 @@ def log_llm_call(
 ) -> None:
     """Append one llm_call event. Never raises."""
     try:
+        from config.settings import get_settings
+
         settings = get_settings()
         if not settings.trace_log_enabled:
             return

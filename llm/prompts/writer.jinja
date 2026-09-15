@@ -13,6 +13,14 @@ generate -> critique own output -> revise once before Compliance):
                               Compliance rejection; reasons are MANDATORY
                               instructions, not suggestions.
 
+WHY THE OUTPUT-CONTRACT MACRO APPEARS IN EVERY BRANCH: the 2026-09-15 live
+run failed 3/3 in the revise pass with {"posts": [{"0": {...}}]} — the model
+had the right content in the wrong container. The draft branch restated the
+JSON shape and passed first-try; revise did not restate it and failed. Lesson
+encoded here: EVERY branch that expects JSON sees the exact shape, no
+exceptions. Small models copy examples; they do not remember prompt layout
+across a multi-turn repair.
+
 The self-critique checklist you apply before returning copy (why: the doc
 requires a generate -> critique -> revise pass before Compliance ever sees
 the draft):
@@ -24,6 +32,51 @@ the draft):
   5. Hashtags: 3-5, specific to the post (never generic spam tags).
   6. Voice: reads like a human operator wrote it, not a press release.
 ===================================================================== -#}
+{% macro posts_json_contract() -%}
+RESPOND WITH ONLY THIS JSON (no markdown, no commentary, no code fences). The
+"posts" array MUST contain EXACTLY ONE OBJECT PER POST — if you were shown 3
+posts to write or revise, return 3 objects here; if 2, return 2; never fewer.
+Keep each object's "pillar" and "channel" EXACTLY as assigned. "hashtags" is a
+JSON ARRAY OF STRINGS — never one string with spaces. "cta" may be null but the
+key must exist.
+
+{
+  "posts": [
+    {
+      "pillar": "the pillar name this post belongs to",
+      "channel": "the channel id this post is for",
+      "copy": "the full post text",
+      "hashtags": ["#tag1", "#tag2", "#tag3"],
+      "cta": "the single call to action, or null"
+    },
+    {
+      "pillar": "the pillar name this post belongs to",
+      "channel": "the channel id this post is for",
+      "copy": "the full post text",
+      "hashtags": ["#tag1", "#tag2"],
+      "cta": null
+    }
+  ]
+}
+{%- endmacro %}
+
+{% macro critique_json_contract() -%}
+RESPOND WITH ONLY THIS JSON (no markdown, no commentary, no code fences):
+
+{
+  "issues": [
+    {
+      "post_index": 0,
+      "issue": "the concrete problem a reader would notice",
+      "fix": "the specific change that fixes it"
+    }
+  ]
+}
+
+"issues" may be an empty array [] when a draft is clean — do not invent
+problems. post_index is the [n] index shown next to each draft.
+{%- endmacro %}
+
 You are the Content Writer of a social media agency.
 
 CAMPAIGN (audience, pillars, KPIs):
@@ -38,6 +91,8 @@ If a draft is clean, do not invent issues; return an empty list for it.
 
 DRAFTS TO CRITIQUE:
 {{ drafts_for_critique }}
+
+{{ critique_json_contract() }}
 {% elif writing_pass == "revise" %}
 {% if rejection_reasons %}
 YOUR PREVIOUS COPY FOR THESE POSTS WAS REJECTED BY COMPLIANCE. The rejection
@@ -56,9 +111,11 @@ YOUR OWN CRITIQUE FOUND THESE ISSUES — fix all of them:
 PREVIOUS COPY (change meaningfully, don't reshuffle words):
 {{ previous_posts }}
 
-Revise the post copy — same channels, same pillars, substantively better.
-The revision MUST differ from the rejected draft; Compliance re-checks
-every reason.
+Revise the post copy — same pillar and channel per post, substantively
+better text. The revision MUST differ from the rejected draft; Compliance
+re-checks every reason.
+
+{{ posts_json_contract() }}
 {% else %}
 Write the post copy:
 - For each pillar, write {{ posts_per_pillar }} post(s) for the given channel,
@@ -72,4 +129,6 @@ Write the post copy:
 - Absolute claim words are forbidden: guaranteed, proven, #1, miracle, cure,
   best ever, risk-free
 Return one JSON object per post: {pillar, channel, copy, hashtags[], cta}
+
+{{ posts_json_contract() }}
 {% endif %}

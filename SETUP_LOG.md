@@ -243,3 +243,39 @@ platform.db (survives restarts; replayable):
 - **Two-stage analytics proven offline:** `kpi_performance` in the
   WeeklyReport is computed by Python; the model narrates and literally
   cannot write numbers into the KPI table (schema separation).
+
+### Day 1+2 live verification — 2026-09-15 (Ollama installed, model layer proven live)
+
+Ollama 0.34.0 installed via official installer; both models pulled:
+
+```bash
+ollama pull qwen2.5:3b-instruct   # 1.9 GB
+ollama pull qwen2.5:7b-instruct   # 4.7 GB
+ollama list                        # both must appear
+curl http://localhost:11434/api/version   # {"version":"0.34.0"}
+```
+
+Two fixes made during live bring-up (both found BY the live test, kept):
+
+1. `OLLAMA_TIMEOUT_SECONDS` (new setting, default 600): the client's old
+   hardcoded 120s HTTP timeout died during the 7B's first-call weight load
+   (measured: 56 s cold load + generation > 120 s on this CPU-only host).
+   Config-driven now; `.env.example` documents it.
+2. `llm/trace.py::log_llm_call` had a latent `NameError` (used `get_settings`
+   without the function-local import its siblings have) — first live call
+   surfaced it; fixed and covered by the full suite.
+
+Verification runs (all green):
+
+```bash
+.venv/Scripts/python.exe -m pytest tests/ -q          # 63 passed
+.venv/Scripts/python.exe scripts/test_model_layer.py  # 6/6 live cases OK
+```
+
+Model-layer live result summary:
+
+- 7B + 3B: clean JSON -> OK attempt 1; corrupted first response -> retry with
+  validation error appended -> OK attempt 2; hostile prose around JSON ->
+  extracted OK attempt 1.
+- Trace excerpt (logs/agent_trace.jsonl): `structured_output_retry ok=False
+  attempt=1` then `llm_call p=194` (repair prompt) then `ok=True attempt=2`.

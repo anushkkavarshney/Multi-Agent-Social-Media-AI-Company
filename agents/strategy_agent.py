@@ -97,8 +97,15 @@ class StrategyAgent(BaseAgent):
 
         # Rebuild the Campaign through the Pydantic contract: weight-sum and
         # KPI-shape rules are re-validated HERE, not trusted from the model.
-        filled = campaign.model_copy(
-            update={
+        # Dict-overlay + model_validate (NOT model_copy(update=...)): model_copy
+        # bypasses validation, which left content_pillars/kpis as raw dicts and
+        # produced pydantic serializer warnings on every later dump. Going
+        # through model_validate constructs real ContentPillar/KPISet objects
+        # and re-runs the strategy-fields-required validator — the plan is
+        # structurally complete or this raises (never half-filled status).
+        data = campaign.model_dump()
+        data.update(
+            {
                 "target_audience": plan.target_audience,
                 "channel_mix": plan.channel_mix,
                 "duration_days": plan.duration_days,
@@ -110,13 +117,10 @@ class StrategyAgent(BaseAgent):
                     {"metric": k.metric, "target": k.target, "channel": k.channel}
                     for k in plan.kpis
                 ],
-                "status": campaign.status,  # status transitions belong to the runner/orchestrator
-            },
-            deep=True,
+                # status NOT touched: transitions belong to the runner/orchestrator
+            }
         )
-        filled = type(campaign).model_validate(filled.model_dump())
-        # Re-validation runs the strategy-fields-required validator — the plan
-        # is structurally complete or this raises (never half-filled status).
+        filled = type(campaign).model_validate(data)
 
         self.log_io(
             "output",

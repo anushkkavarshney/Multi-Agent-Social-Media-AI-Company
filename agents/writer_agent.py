@@ -154,5 +154,39 @@ class WriterAgent(BaseAgent):
             transport=transport,
             campaign_id=campaign.id,
         )
-        self.log_io("output", campaign_id=campaign.id, pass_name="revise", posts=len(result.posts))
-        return result.posts
+        # Guard: the model sometimes returns FEWER posts than it was given
+        # (2026-09-15 live run dropped 3 -> 1 on the revise pass). Never allow
+        # a silent data-loss: posts missing from the model output are kept
+        # from the previous round, preserving order, so the pipeline always
+        # carries the full assignment forward.
+        revision = result.posts
+        if len(revision) < len(previous_drafts):
+            merged: list[PostDraft] = []
+            for i, prev in enumerate(previous_drafts):
+                merged.append(revision[i] if i < len(revision) else prev)
+            self.log_io(
+                "output",
+                campaign_id=campaign.id,
+                pass_name="revise",
+                posts_requested=len(previous_drafts),
+                posts_returned=len(result.posts),
+                posts_merged_from_previous=len(previous_drafts) - len(result.posts),
+            )
+            revision = merged
+        elif len(revision) > len(previous_drafts):
+            self.log_io(
+                "output",
+                campaign_id=campaign.id,
+                pass_name="revise",
+                posts_requested=len(previous_drafts),
+                posts_returned=len(result.posts),
+                posts_truncated_to_requested=len(previous_drafts),
+            )
+            revision = revision[: len(previous_drafts)]
+        self.log_io(
+            "output",
+            campaign_id=campaign.id,
+            pass_name="revise",
+            posts=len(revision),
+        )
+        return revision

@@ -50,10 +50,12 @@ _MODEL_HINT = (
 class OllamaClient:
     """One client per process; methods are safe to call concurrently."""
 
-    def __init__(self, host: str | None = None, timeout: float = 120.0):
+    def __init__(self, host: str | None = None, timeout: float | None = None):
         settings = get_settings()
         self.host = (host or settings.ollama_host).rstrip("/")
-        self.timeout = timeout
+        # Default comes from settings (OLLAMA_TIMEOUT_SECONDS) so CPU-only hosts
+        # can allow for slow first-call model loading; explicit arg wins for tests.
+        self.timeout = timeout if timeout is not None else settings.ollama_timeout_seconds
         # One connection pool; limits kept modest — Ollama serializes GPU runs.
         self._client = httpx.AsyncClient(base_url=self.host, timeout=timeout)
 
@@ -124,6 +126,13 @@ class OllamaClient:
             payload["format"] = format_schema
         if options:
             payload["options"] = options
+        # `raw` was previously accepted but never forwarded — structured_output
+        # passes raw=True so OUR prompt reaches the model untemplated (the
+        # daemon otherwise wraps it in the model's chat template, which mangles
+        # the embedded JSON contract). Fixed 2026-09-15 after the writer's
+        # revise pass produced {posts:[{"0":...}]} envelopes in the trace.
+        if raw:
+            payload["raw"] = True
 
         await self._ensure_reachable()
         await self._ensure_model(model)
