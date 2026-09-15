@@ -98,7 +98,10 @@ class MemoryStore:
             "PATTERNS FOUND:\n" + "\n".join(patterns_found) + "\n\n"
             "RECOMMENDATIONS:\n"
             + "\n".join(
-                f"- {r['change']} (evidence: {r['evidence']}; expected: {r['expected_effect']})"
+                f"- {r['change']} (evidence: {r['evidence']}; statistic: "
+                f"{r.get('underlying_statistic', '-')}; confidence: "
+                f"{r.get('confidence', '-')}; expected: {r['expected_effect']}; "
+                f"predicted: {r.get('predicted_effect', '-')})"
                 for r in recommendations
             )
             + f"\n\nSENTIMENT: {comment_sentiment_summary}"

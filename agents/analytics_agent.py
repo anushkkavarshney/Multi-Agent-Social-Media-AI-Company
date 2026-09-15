@@ -29,7 +29,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from agents.base_agent import BaseAgent
 from llm.trace import append_event
-from models.report import Recommendation, WeeklyReport
+from models.report import METHODOLOGY_PARAGRAPH, Recommendation, WeeklyReport
 
 
 def compute_stats(
@@ -201,7 +201,54 @@ class _PostInsightOut(BaseModel):
 class _RecommendationOut(BaseModel):
     change: str
     evidence: str
+    underlying_statistic: str
+    confidence: str  # literal enforced by the validator below
     expected_effect: str
+    predicted_effect: str
+
+    @field_validator("confidence")
+    @classmethod
+    def confidence_must_be_known(cls, v: str) -> str:
+        if v not in ("observed_correlation", "hypothesis_unverified"):
+            raise ValueError(f"confidence must be observed_correlation | hypothesis_unverified, got '{v}'")
+        return v
+
+
+def _downgrade_undersized_confidence(recommendations: list[dict]) -> list[dict]:
+    """Enforce the methodology's sample floor in PYTHON, not the LLM's word.
+
+    The template tells the model to label honestly, but we do not trust a
+    model to self-certify sample sizes.  If a recommendation's own
+    ``underlying_statistic`` names a single-post group (n=1 or "1 posts"/"1
+    post"), it is downgraded to ``hypothesis_unverified`` — the confidence
+    field is a computed claim, not a narration choice.
+    """
+    import re
+
+    downgraded = 0
+    for i, r in enumerate(recommendations):
+        stat_low = r["underlying_statistic"].lower()
+        # The template forces the model to state sample sizes ("n=2 vs n=1
+        # posts"); parse every n= value and enforce the floor on the minimum.
+        group_sizes = [int(v) for v in re.findall(r"\bn\s*=\s*(\d+)", stat_low)]
+        # Fallback when the model wrote "1 post" instead of "n=1".
+        undersized = (group_sizes and min(group_sizes) < 2) or bool(
+            re.search(r"\b1\s+post\b", stat_low)
+        )
+        if undersized and r["confidence"] == "observed_correlation":
+            r = dict(r)
+            r["confidence"] = "hypothesis_unverified"
+            recommendations[i] = r
+            downgraded += 1
+    if downgraded:
+        append_event(
+            {
+                "event": "analytics_confidence_downgrade",
+                "downgraded": downgraded,
+                "reason": "underlying_statistic states a group with n < 2; sample floor not met",
+            }
+        )
+    return recommendations
 
 
 class _Narrative(BaseModel):
@@ -272,6 +319,7 @@ class AnalyticsAgent(BaseAgent):
             "analytics.jinja",
             stats=stats,  # Jinja renders the dict readably; template forbids inventing numbers
             kpis=kpis,
+            methodology=METHODOLOGY_PARAGRAPH,
         )
         narrative: _Narrative = await self.call_model(
             instruction=prompt,
@@ -283,9 +331,23 @@ class AnalyticsAgent(BaseAgent):
         # Assemble the contract: narrative fields from the model, numeric
         # fields from Python. PostInsight/Recommendation contracts are
         # validated on construction (blank strings rejected here).
+        recs = [
+            {
+                "change": r.change,
+                "evidence": r.evidence,
+                "underlying_statistic": r.underlying_statistic,
+                "confidence": r.confidence,
+                "expected_effect": r.expected_effect,
+                "predicted_effect": r.predicted_effect,
+            }
+            for r in narrative.recommendations
+        ]
+        recs = _downgrade_undersized_confidence(recs)
+
         report = WeeklyReport(
             campaign_id=campaign_id,
             week_number=week_number,
+            methodology=METHODOLOGY_PARAGRAPH,
             kpi_performance=stats["kpi_performance"],
             post_insights=[
                 {"post_id": i.post_id, "performance_rank": i.performance_rank, "hypothesis": i.hypothesis}
@@ -293,10 +355,7 @@ class AnalyticsAgent(BaseAgent):
             ],
             patterns_found=narrative.patterns_found,
             comment_sentiment_summary=narrative.comment_sentiment_summary,
-            recommendations=[
-                {"change": r.change, "evidence": r.evidence, "expected_effect": r.expected_effect}
-                for r in narrative.recommendations
-            ],
+            recommendations=recs,
         )
 
         self.log_io(

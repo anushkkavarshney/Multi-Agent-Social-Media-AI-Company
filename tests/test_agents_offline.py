@@ -327,7 +327,10 @@ async def test_analytics_two_stage_python_computes_model_narrates(bus_env, campa
         "recommendations": [{
             "change": "move overnight slots to the 18:00-21:00 window",
             "evidence": "peak mean impressions exceed offpeak mean in the timing stats",
+            "underlying_statistic": "peak mean impressions 1,100 vs offpeak 270; n=2 vs n=2",
+            "confidence": "observed_correlation",
             "expected_effect": "higher impressions per post",
+            "predicted_effect": "posts at 18:00-21:00 on ch_shortform should average above 1,000 impressions next week",
         }],
     })
     agent = AnalyticsAgent(bus=make_test_bus(bus_env))

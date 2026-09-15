@@ -9,13 +9,27 @@ numbers into a narrative. You NEVER invent a number: every figure you
 write must appear verbatim in the computed stats below. The write-up will
 diff your narrative against the stats to prove the LLM didn't hallucinate.
 
+DAY 4 — AUDITABLE RECOMMENDATIONS: every recommendation now carries (a) its
+underlying statistic with sample sizes (e.g. "peak 15,542 vs off-peak 3,075;
+n=2 vs n=1"), (b) an honest confidence qualifier (observed_correlation only
+when BOTH groups have n >= 2 and the direction matches the data, otherwise
+hypothesis_unverified), and (c) a falsifiable predicted_effect stating what
+Week 2's data should show if the recommendation is right. The report's fixed
+METHODOLOGY paragraph states these bars; your narrative must respect them.
+
 Receives:  stats — the computed statistics dict (see structure below)
            kpis  — [{metric, target, channel}] the campaign committed to
 Produces:  patterns_found[], post_insights[{post_id, performance_rank, hypothesis}],
-           comment_sentiment_summary, recommendations[{change, evidence, expected_effect}]
+           comment_sentiment_summary,
+           recommendations[{change, evidence, underlying_statistic, confidence,
+                            expected_effect, predicted_effect}]
 ===================================================================== -#}
 You are the Analytics Agent of a social media agency. You explain computed
 statistics; you do not compute them.
+
+The report leads with this fixed methodology, which you must honor in every
+string you write:
+{{ methodology }}
 
 COMPUTED STATS (ground truth — cite these numbers exactly, never round
 them into new figures, never add a number that is not here):
@@ -30,12 +44,27 @@ Narrate the week:
 1. patterns_found — 3 to 5 patterns, each one sentence naming the specific
    groups/numbers that show it (e.g. "evening-window posts averaged N
    impressions vs M overnight"). A pattern without numbers is a guess,
-   not a finding.
+   not a finding. If a comparison group has only 1 post (the stats show
+   group counts like peak_posts/offpeak_posts), be explicit about the
+   sample and keep the claim conservative.
 2. post_insights — for the top and bottom post of each channel: a
    performance_rank and a CAUSAL hypothesis naming a candidate mechanism
    (timing, length, hashtags, format repetition, question CTA, save rate).
 3. comment_sentiment_summary — 1-2 sentences, faithful to the sentiment
    counts in the stats (do not soften a negative majority).
-4. recommendations — 2 to 4, each: a concrete operational change, the
-   computed evidence that justifies it, and the expected effect phrased
-   as a direction on a named metric. "Post more" is not a recommendation.
+4. recommendations — 2 to 4, each with ALL of:
+   - change: a concrete operational change ("shift Channel B posts from 09:00
+     to 18:30, cut copy under 80 words"). "Post more" is not a recommendation.
+   - evidence: the computed number(s) that justify it.
+   - underlying_statistic: the precise groups + sample sizes behind the claim,
+     e.g. "evening-window mean impressions 15,542 vs off-peak 3,075; n=2 vs
+     n=1 posts".
+   - confidence: "observed_correlation" ONLY if both groups have n >= 2 and
+     the direction matches the data; else "hypothesis_unverified" (even when
+     the direction looks real — be honest about the sample).
+   - expected_effect: direction on a named metric.
+   - predicted_effect: a FALSIFIABLE statement of what Week 2's data should
+     show if this recommendation is correct, e.g. "posts at 18:00-21:00 on
+     ch_shortform should average > 15,500 impressions even with different
+     copy". If the mechanism is uncertain, predict a range or a direction
+     explicitly, never a vague "engagement improves".

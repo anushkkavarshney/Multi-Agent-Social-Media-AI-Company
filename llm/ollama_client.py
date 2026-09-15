@@ -57,7 +57,10 @@ class OllamaClient:
         # can allow for slow first-call model loading; explicit arg wins for tests.
         self.timeout = timeout if timeout is not None else settings.ollama_timeout_seconds
         # One connection pool; limits kept modest — Ollama serializes GPU runs.
-        self._client = httpx.AsyncClient(base_url=self.host, timeout=timeout)
+        # The client MUST see self.timeout (not the raw arg): httpx treats None
+        # as "no timeout", and a genuinely stuck CPU lookahead (JSON-grammar
+        # constrained generation on a 7B) then hangs the pipeline forever.
+        self._client = httpx.AsyncClient(base_url=self.host, timeout=self.timeout)
 
     async def aclose(self) -> None:
         await self._client.aclose()

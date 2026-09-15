@@ -312,6 +312,27 @@ def test_analytics_kpi_vs_target():
     assert stats["kpi_vs_target"][0]["measured"] == 5000.0
 
 
+def test_analytics_downgrades_undersized_confidence():
+    """n<2 in a stated statistic forces hypothesis_unverified, regardless of
+    what the model claimed; n>=2 groups keep observed_correlation."""
+    from agents.analytics_agent import _downgrade_undersized_confidence
+
+    big = {
+        "change": "shift to evening window",
+        "evidence": "peak mean beats offpeak",
+        "underlying_statistic": "peak mean 1,100 vs offpeak 270; n=2 vs n=2",
+        "confidence": "observed_correlation",
+    }
+    tiny = dict(big)
+    tiny["underlying_statistic"] = "peak mean 1,100 vs offpeak 270; n=2 vs n=1"
+    fine = dict(big)
+    fine["underlying_statistic"] = "peak mean 1,100 vs offpeak 270; n=2 posts vs n=2 posts"
+    out = _downgrade_undersized_confidence([big, tiny, fine])
+
+    names = [r["confidence"] for r in out]
+    assert names == ["observed_correlation", "hypothesis_unverified", "observed_correlation"]
+
+
 # --------------------------------------------- scheduler slot spread
 
 
