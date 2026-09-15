@@ -54,16 +54,25 @@ class StrategyOutput(BaseModel):
 class StrategyAgent(BaseAgent):
     name = "strategy"
 
-    # --- memory stub (Day 3 wires memory/campaign_memory.py here) -----------
+    # --- memory (Day 3: real top-k retrieval from campaign_memory) -----------
     async def retrieve_learnings(self, objective: str, channels: list[str]) -> list[str]:
         """Return top-k past-campaign learnings relevant to this plan.
 
-        Day-2 stub: memory/ is a Day-3 deliverable (doc build order step 9).
-        Signature is final — replace the body with a vector-store query and
-        nothing else in this file changes.
+        Day-2 stub replaced (2026-09-15): memory/campaign_memory.py now
+        stores each WeeklyReport's patterns + recommendations as a local
+        embedding and returns the cosine-nearest k texts.  With zero reports
+        (fresh DB) it returns [] — the strategy prompt's "none available"
+        branch — so the contract is unchanged in that common path.
         """
-        # TODO(Day 3): memory.campaign_memory.retrieve_top_k(objective, channels, k=3)
-        return []
+        try:
+            from memory.campaign_memory import MemoryStore
+        except Exception:  # noqa: BLE001 — memory is best-effort, never blocks strategy
+            return []
+        try:
+            store = MemoryStore()
+            return await store.retrieve_top_k(objective, channels, k=3)
+        except Exception:  # noqa: BLE001
+            return []
 
     async def run(
         self, campaign: Campaign, channel_profiles: list[dict], *, transport=None

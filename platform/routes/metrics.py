@@ -7,6 +7,7 @@ outputs here are plain dicts of real numbers from the DB.
 """
 
 from datetime import datetime, timedelta, timezone
+from math import sqrt
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select

@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     # --- Mock platform -------------------------------------------------------
     db_path: str = "./platform.db"
     create_tables_on_startup: bool = True
+    platform_base_url: str = "http://127.0.0.1:8010"
 
     # --- Simulation ----------------------------------------------------------
     # Fixed default seed keeps the platform's statistical behavior reproducible

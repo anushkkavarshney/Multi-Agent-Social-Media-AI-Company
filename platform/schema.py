@@ -153,3 +153,48 @@ class MessageBusRecord(Base):
     campaign_id: Mapped[str] = mapped_column(String(64), index=True)
     message_type: Mapped[str] = mapped_column(String(64))
     payload_json: Mapped[dict] = mapped_column(JSON)
+
+
+class NeedsHumanReview(Base):
+    """Escalation queue: sensitive community comments routed to a human (Day 3).
+
+    The Community Manager's contract (architecture doc section 7): comments
+    flagged sensitive by the platform, or mis-classified by the router, are
+    NOT auto-replied — they land here for a human decision. A real product
+    would render this as a review UI; the mock keeps it as a table + the CLI
+    `queue` viewer. Pages through the same SQLite DB as everything else.
+    """
+
+    __tablename__ = "needs_human_review"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(String(64), index=True)
+    post_id: Mapped[str] = mapped_column(String(64), index=True)
+    comment_id: Mapped[str] = mapped_column(String(64))
+    reason: Mapped[str] = mapped_column(Text)
+    comment_text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_utc)
+    resolved: Mapped[int] = mapped_column(Integer, default=0)  # 0 = open, 1 = done
+
+
+class MemoryRecord(Base):
+    """One stored embeddable learning from a prior campaign (Day 3, doc section 10).
+
+    The memory layer (memory/campaign_memory.py) stores a WeeklyReport's
+    recommendations + patterns_found as a text blob with a local embedding
+    vector (pure-Python, offline/deterministic); the Strategy Agent retrieves
+    the top-k most cosine-similar records when planning the next campaign.
+
+    `vector_json` is a fixed-dimension list of floats (JSON text column —
+    SQLite has no array type).
+    """
+
+    __tablename__ = "memory_records"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    campaign_id: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_utc)
+    source_week: Mapped[int] = mapped_column(Integer, default=1)
+    # Human-readable learning text (what retrieval returns to the Strategy Agent).
+    text: Mapped[str] = mapped_column(Text)
+    vector_json: Mapped[dict] = mapped_column(JSON, default=dict)  # {"vector": [...]}

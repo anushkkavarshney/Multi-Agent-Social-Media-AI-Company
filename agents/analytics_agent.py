@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, Field, field_validator
 
 from agents.base_agent import BaseAgent
+from llm.trace import append_event
 from models.report import Recommendation, WeeklyReport
 
 
@@ -105,9 +106,10 @@ def compute_stats(
     # --- question-CTA vs statement (the comment-lift rule, visible) --------
     q_comments, s_comments = [], []
     for pid, p in per_post.items():
-        # copy_is_question is passed through snapshots by the platform side;
-        # fixture data sets it explicitly.
-        bucket = q_comments if p.get("copy_is_question") else s_comments
+        # Platform emits ``ends_in_question``; Day-2 fixture data sets
+        # ``copy_is_question``.  Accept either key so both paths work.
+        is_question = p.get("ends_in_question", p.get("copy_is_question", False))
+        bucket = q_comments if is_question else s_comments
         bucket.append(p["comments"])
     stats["question_cta"] = {
         "question_posts": len(q_comments),
@@ -144,7 +146,30 @@ def compute_stats(
         "comment_rate": stats["comment_rate_total"],
         "save_rate": stats["save_rate_total"],
         "follower_growth": float(total_followers),
+        "likes": sum(p["likes"] for p in per_post.values()),
+        "clicks": sum(p["clicks"] for p in per_post.values()),
+        "shares": sum(p["shares"] for p in per_post.values()),
     }
+
+    # KPI vs target (the model can only reference these verified numbers)
+    available_metrics = {
+        "impressions": float(total_impressions),
+        "engagement_rate": stats["engagement_rate_total"],
+        "comment_rate": stats["comment_rate_total"],
+        "save_rate": stats["save_rate_total"],
+        "follower_growth": float(total_followers),
+        "click_through_rate": stats["kpi_performance"]["clicks"] / total_impressions if total_impressions else 0.0,
+        "share_rate": stats["kpi_performance"]["shares"] / total_impressions if total_impressions else 0.0,
+    }
+    stats["kpi_vs_target"] = [
+        {
+            "metric": k.get("metric"),
+            "target": k.get("target"),
+            "measured": round(available_metrics.get(k.get("metric"), 0.0), 4),
+            "channel": k.get("channel"),
+        }
+        for k in kpis
+    ]
 
     # --- comment sentiment counts -------------------------------------------
     sentiment_counts: dict[str, int] = defaultdict(int)
@@ -215,6 +240,7 @@ class AnalyticsAgent(BaseAgent):
         *,
         channel_of_post: dict[str, str] | None = None,
         window_hours_of_post: dict[str, str] | None = None,
+        precomputed_stats: dict | None = None,
         transport=None,
     ) -> WeeklyReport:
         """Compute stats (stage 1), narrate (stage 2), assemble the report.
@@ -222,6 +248,11 @@ class AnalyticsAgent(BaseAgent):
         The returned WeeklyReport's kpi_performance comes from compute_stats,
         not from the model. Day 3 swaps the fixture snapshots/comments for
         the platform's /analytics/week payload; nothing else changes.
+
+        `precomputed_stats` is the Day-3 wiring's one-time stage-1 result
+        (already logged as its own step), passed in so stats are computed and
+        shown exactly once in a run's trace — not twice under slightly
+        different noise.
         """
         self.log_io(
             "input",
@@ -231,7 +262,7 @@ class AnalyticsAgent(BaseAgent):
             comments=len(comments),
         )
 
-        stats = compute_stats(
+        stats = precomputed_stats or compute_stats(
             snapshots, comments, kpis,
             channel_of_post=channel_of_post,
             window_hours_of_post=window_hours_of_post,
@@ -281,5 +312,98 @@ class AnalyticsAgent(BaseAgent):
             campaign_id=campaign_id,
             message_type="weekly_report_ready",
             payload=report.model_dump(mode="json"),
+        )
+        return report
+
+    # ------------------------------------------------------------------
+    # Day 3 wiring: fetch real week data from the platform, then narrate
+    # ------------------------------------------------------------------
+
+    async def run_week(
+        self,
+        platform,
+        campaign_id: str,
+        week_number: int,
+        campaign,
+        channels: list[dict],
+        *,
+        posture: bool = True,
+    ) -> WeeklyReport:
+        """Full two-stage analysis over the LIVE platform week (no fixtures).
+
+        Stage 0 — fetch: GET /analytics/week/{campaign_id}/{week} returns the
+        platform's own computed aggregation (post_rows with per-post features +
+        outcomes, totals, and the platform's built-in patterns dict).  The
+        aggregate post_rows are reshaped to compute_stats' snapshot contract.
+
+        Stage 1 — compute: compute_stats() runs in plain Python and its output
+        is logged as its OWN trace/console step (``analytics_computed_stats``)
+        BEFORE the model is consulted. This is the write-up's proof that the
+        numbers the narrative cites were computed, not eyeballed.
+
+        Stage 2 — narrate: run() summons the model over the precomputed stats.
+
+        Also fetches the week's comment texts (GET /posts/{id}/comments) so
+        sentiment counts come from real comment data, not comment totals.
+        """
+        payload = await platform.get_weekly(campaign_id, week_number)
+        post_rows = payload["post_rows"]
+
+        channel_of_post = {r["post_id"]: r["channel_id"] for r in post_rows}
+        window_hours_of_post = {
+            r["post_id"]: ("peak" if "peak" in r["time_window"] else "offpeak")
+            for r in post_rows
+        }
+
+        # Reshape post_rows (aggregate rows without recorded_at) to the
+        # per-post snapshot contract compute_stats expects. post_rows are ALREADY
+        # the latest snapshot per post, so one recorded_at is enough to disambiguate.
+        snapshots = [
+            {
+                **{k: r[k] for k in (
+                    "post_id", "impressions", "likes", "comments", "shares",
+                    "saves", "clicks", "follower_delta", "ends_in_question",
+                )},
+                "recorded_at": payload["week_end"],
+            }
+            for r in post_rows
+        ]
+
+        # Real comment text per post (feed get_comments).
+        comments: list[dict] = []
+        for post_id in channel_of_post:
+            for c in await platform.get_comments(post_id):
+                comments.append(
+                    {"post_id": post_id, "text": c.get("text", ""), "sentiment": c.get("sentiment", "neutral")}
+                )
+
+        kpis = [k.model_dump(mode="json") for k in campaign.kpis]
+
+        # ---- STAGE 1: compute + log as a DISTINCT step (before any model) ----
+        stats = compute_stats(
+            snapshots, comments, kpis,
+            channel_of_post=channel_of_post,
+            window_hours_of_post=window_hours_of_post,
+        )
+        append_event(
+            {
+                "event": "analytics_computed_stats",
+                "campaign_id": campaign_id,
+                "week_number": week_number,
+                "stage": 1,
+                "channel_of_post": channel_of_post,
+                "window_hours_of_post": window_hours_of_post,
+                "stats": stats,
+            }
+        )
+        self.log_io("computed_stats", campaign_id=campaign_id, week_number=week_number, stats=stats)
+
+        # ---- STAGE 2: narrate over the precomputed stats (never re-drawn) ----
+        report = await self.run(
+            campaign_id, week_number,
+            snapshots, comments, kpis,
+            channel_of_post=channel_of_post,
+            window_hours_of_post=window_hours_of_post,
+            precomputed_stats=stats,
         )
         return report

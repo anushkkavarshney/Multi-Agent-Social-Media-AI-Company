@@ -37,8 +37,18 @@ router = APIRouter()
 
 
 def _rng(seed: int | None = None) -> np.random.Generator:
-    base = seed if seed is not None else get_settings().sim_seed
-    return np.random.default_rng(base)
+    """Shared process RNG unless the caller supplies an explicit seed (tests).
+
+    When seed is None the process-wide Generator from _rng.py is used (its
+    stream advances across calls, giving each post a different noise draw).
+    When seed is an int a fresh local Generator is created so deterministic
+    single-tick tests are unaffected.
+    """
+    from platform.routes._rng import get_rng
+
+    if seed is not None:
+        return np.random.default_rng(seed)
+    return get_rng()
 
 
 async def _get_or_create_state(session: AsyncSession, campaign_id: str) -> SimulationState:

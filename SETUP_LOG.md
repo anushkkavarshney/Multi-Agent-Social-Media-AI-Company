@@ -279,3 +279,111 @@ Model-layer live result summary:
   extracted OK attempt 1.
 - Trace excerpt (logs/agent_trace.jsonl): `structured_output_retry ok=False
   attempt=1` then `llm_call p=194` (repair prompt) then `ok=True attempt=2`.
+
+---
+
+## Day 3 — 2026-09-15 (live publishing, tom week, real engagement, live analytics)
+
+Build-order steps 9-11 plus closing Day-2 stubs: scheduler publishes to the
+real platform, a simulated week accrues real engagement under hidden rules,
+the Community Manager reads real comments and posts replies/ escalations, the
+Analytics Agent produces a real weekly report from platform data (not
+fixtures), and the strategy agent's memory retrieval is wired to a local
+embedding store.
+
+### 1. Run the full test suite (Day 1 + 2 + 3)
+
+```bash
+.venv/Scripts/python.exe -m pytest tests/ -q
+# Day-3 result: 88 passed in ~15s (was 63 after Day 2; +25 new)
+```
+
+New offline tests `tests/test_day3_wiring.py` cover: the shared RNG fix,
+PlatformClient publish/tick/metrics/analytics via ASGITransport (no server),
+MemoryStore store+retrieve round-trip, analytics key compat (`ends_in_question`
+vs `copy_is_question`) and `kpi_vs_target`, scheduler day-spread, and the
+escalation queue.
+
+### 2. Start the platform (separate terminal)
+
+```bash
+.venv/Scripts/python.exe -m platform.main
+# http://127.0.0.1:8010  (kept running for the whole Day-3 demo)
+```
+
+### 3. Run the full demo
+
+```bash
+# Requires Ollama up (Day 1 section 6). Full pipeline, auto-approve human gate:
+.venv/Scripts/python.exe run_demo.py --brief seed_data\demo_brief.txt --auto-approve
+```
+
+What you should see (stages persistent across process restarts via
+`logs/demo_checkpoint.json`, `--fresh` to restart):
+
+1. orchestrator parses brief -> campaign id + routing plan
+2. strategy fills audience / 3 pillars / KPIs
+3. writer drafts -> self-critiques -> revises
+4. creative briefs per post (asset type + description)
+5. compliance: forced banned-phrase injection on post 1 -> reject -> revise ->
+   approve loop
+6. human gate: `--auto-approve` skips the y/n prompt
+7. scheduler: 3 posts spread across the 7-day window at each channel's peak hour
+8. publish: 3 POSTs to the live platform
+9. simulate: ~33 six-hour ticks; each post accrues once in its window
+10. community manager: real comment counts per post; replies/escalations via router
+11. analytics: stage-1 stats (computed, logged as `analytics_computed_stats`)
+    then stage-2 model narration; `logs/week1_campaign_<id>_report.json` written
+12. memory: learnings embedded + stored (`memory_records`); week-2 retrieval wired
+13. discovery scoring: agent findings table vs the 6 ground-truth rules
+14. summary + trace + checkpoint cleared
+
+Captured run transcript: `writeup/sample_run_transcript.md`.
+Example scoring verdict from the live run: 2 of 6 rules found (honest sparse-week
+result — see the transcript's "How to read the verdict").
+
+### 4. Inspect outcomes
+
+```bash
+# Weekly report (the analytics deliverable):
+cat logs/week1_campaign_*.json
+
+# Agent conversation incl. analytics stages + bus handoffs:
+cat logs/agent_trace.jsonl
+
+# CLI viewers (read the platform DB directly; server may stay up):
+.venv/Scripts/python.exe -m cli.viewer feed
+.venv/Scripts/python.exe -m cli.viewer feed --campaign camp_9b7fb8c7
+.venv/Scripts/python.exe -m cli.viewer trace camp_9b7fb8c7
+.venv/Scripts/python.exe -m cli.viewer report camp_9b7fb8c7 1
+.venv/Scripts/python.exe -m cli.viewer escalations --campaign camp_9b7fb8c7
+
+# Discovery scoring script, standalone (auto-finds newest week*_report_*.json):
+.venv/Scripts/python.exe scripts/score_analytics_discovery.py
+```
+
+### Day-3 notes for the write-up (captured live, not reconstructed)
+
+- **Three landmines found by live runs + tests and fixed:**
+  1. `platform/routes/metrics.py` missing `from math import sqrt` (NameError at
+     weekly totals) — caught by the PlatformClient analytics roundtrip test.
+  2. `compute_stats` key mismatch: platform emits `ends_in_question`, fixtures
+     used `copy_is_question` — now both accepted.
+  3. Engagement RNG was being re-seeded per accrual (all draws identical);
+     replaced with a shared process-wide `get_rng()` advancing stream
+     (seeded once from `SIM_SEED`), with per-tick seed override preserved for
+     deterministic single-tick tests.
+- **PlatformClient boundary:** agents now touch the platform ONLY through
+  `platform/client.py` (httpx); unreachable platform raises
+  `PlatformConnectionError` with a "run `python -m platform.main`" fix hint.
+- **Two-stage analytics is real:** stage 1 `compute_stats` over live snapshots
+  is logged as a DISTINCT `analytics_computed_stats` trace event before the
+  model narrates; `kpi_vs_target` compares measured vs the campaign's own KPIs.
+- **Fail-safe escalation observed:** with a 3B router in the loop, all 140
+  comments escalated (router omitted -> "failing safe to human") — conservative
+  by design; replies still proven offline in tests.
+- **Checkpoint/resume proven live:** several stage bugs (jinja channel field,
+  pillar-name drift, stale-resume guards) were fixed and the pipeline resumed
+  mid-campaign instead of restarting — the resume path is the demoed behavior.
+- **Memory is local-first:** char n-gram hashing -> 256-dim vector + cosine,
+  zero external deps; Ollama `nomic-embed-text` documented as the upgrade path.

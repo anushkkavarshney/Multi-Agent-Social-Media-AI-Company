@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 from agents.base_agent import BaseAgent
 from config.settings import get_settings
+from llm.trace import append_event
 from models.engagement import Comment
 
 
@@ -176,3 +177,80 @@ class CommunityManagerAgent(BaseAgent):
             payload={"actions": results},
         )
         return results
+
+    # ------------------------------------------------------------------
+    # Day 3 wiring: fetch real comments, post real replies, return actions
+    # ------------------------------------------------------------------
+
+    async def handle_post_comments(
+        self,
+        platform,
+        campaign_id: str,
+        post_id: str,
+        channel_profile: dict,
+        post_context: dict,
+        *,
+        pillar: str = "",
+    ) -> dict:
+        """Fetch comments for one published post, classify + reply/escalate.
+
+        Returns ``{"post_id", "comments_fetched", "actions": [...]}``.
+        Escalations carry ``escalation_reason`` — the RUNNER owns the DB
+        write (see platform/escalations.py) so the agent itself stays
+        DB-free per the base-agent contract.
+        """
+        raw_comments = await platform.get_comments(post_id)
+        if not raw_comments:
+            return {"post_id": post_id, "comments_fetched": 0, "actions": []}
+
+        comments = [
+            Comment(
+                id=c["id"],
+                post_id=post_id,
+                author_handle=c["author_handle"],
+                text=c["text"],
+                sentiment=c["sentiment"],
+                is_sensitive=c["is_sensitive"],
+                replied=c["replied"],
+            )
+            for c in raw_comments
+        ]
+
+        tone = channel_profile.get("tone", "professional")
+        context = {
+            **post_context,
+            "pillar": pillar,
+            "channel": channel_profile.get("id", ""),
+        }
+        results = await self.process_comments(
+            campaign_id, comments, context, tone,
+        )
+
+        posted_replies = 0
+        for r in results:
+            if r["action"] == "reply" and r.get("reply_text"):
+                comment_id = r["comment_id"]
+                # Post only if the platform comment isn't already replied
+                # (brand reply rows are pre-flagged with replied=True).
+                comment_obj = next((c for c in raw_comments if c["id"] == comment_id), None)
+                if comment_obj and not comment_obj.get("replied"):
+                    try:
+                        await platform.post_reply(post_id, comment_id, r["reply_text"])
+                        posted_replies += 1
+                        append_event({
+                            "event": "community_reply",
+                            "post_id": post_id,
+                            "comment_id": comment_id,
+                            "reply_preview": r["reply_text"][:80],
+                        })
+                    except Exception as exc:
+                        append_event({"event": "community_reply_failed",
+                                      "post_id": post_id, "comment_id": comment_id,
+                                      "error": str(exc)[:200]})
+
+        return {
+            "post_id": post_id,
+            "comments_fetched": len(comments),
+            "replies_posted": posted_replies,
+            "actions": results,
+        }

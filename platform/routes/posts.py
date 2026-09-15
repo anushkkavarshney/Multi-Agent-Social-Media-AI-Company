@@ -74,13 +74,7 @@ def sim_post_dict(post: Post, exposure_fraction: float = 1.0) -> dict:
     }
 
 
-def _rng():
-    """RNG for engagement draws, seeded from settings (reproducible runs)."""
-    import numpy as np
-
-    from config.settings import get_settings
-
-    return np.random.default_rng(get_settings().sim_seed)
+from platform.routes._rng import get_rng as _rng
 
 
 async def _record_history(session: AsyncSession, post: Post, sim_time: datetime) -> None:
