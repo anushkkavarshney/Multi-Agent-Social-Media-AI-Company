@@ -15,7 +15,7 @@ the noise and reveals each rule's effect.
 
 Ground truth (document these in the README/write-up):
     1. time_window_boost          evening window => 1.4-1.8x reach; 02:00-06:00 => 0.5x
-    2. question_cta_comment_lift  copy ending in '?' => 2-3x expected comments
+    2. question_cta_comment_lift  copy ending in '?' => 2-3x expected comments, CHANNEL-MODULATED (discussion 3.0x / short-form 2.5x / professional 2.0x)
     3. nonlinear_hashtag_effect   reach peaks at 3-5 tags; 0 tags underperforms; 8+ penalized
     4. channel_length_penalty     professional >150 words ~30% penalty; short-form >60 words harsher
     5. novelty_decay              same format 3+ days running => compounding 15%/day decay
@@ -80,14 +80,20 @@ def time_window_boost(post: dict, channel_profile: dict, recent_history: dict) -
 def question_cta_comment_lift(post: dict, channel_profile: dict, recent_history: dict) -> float:
     """Rule 2 — comment-count multiplier (NOT reach).
 
-    Copy ending in '?' gets a 2.5x multiplier on the Poisson lambda driving
-    expected comments (doc: 2-3x). Returned as a multiplier that engine.py
+    Copy ending in '?' gets a question_comment_lift multiplier on the Poisson
+    lambda driving expected comments. The lift is CHANNEL-MODULATED: each
+    channel profile carries its own `question_comment_lift` value (doc box
+    "2-3x"), so the same question draws measurably more comments on the
+    discussion channel than on the professional channel — rule 2 is NOT a
+    flat multiplier across channels. Returned as a multiplier that engine.py
     applies ONLY to the comment count, never to reach.
     """
     if not RULES_ENABLED["question_cta_comment_lift"]:
         return 1.0
     copy = post.get("copy", "")
-    return 2.5 if copy.rstrip().endswith("?") else 1.0
+    if not copy.rstrip().endswith("?"):
+        return 1.0
+    return float(channel_profile.get("question_comment_lift", 2.5))
 
 
 def nonlinear_hashtag_effect(post: dict, channel_profile: dict, recent_history: dict) -> float:

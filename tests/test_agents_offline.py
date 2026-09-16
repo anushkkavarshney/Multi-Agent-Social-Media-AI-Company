@@ -119,6 +119,34 @@ async def test_writer_three_pass_pipeline(bus_env, campaign):
     assert revised[0].copy != drafts[0].copy  # substantive revision, not reshuffle
 
 
+async def test_writer_draft_enforces_exact_post_count(bus_env, campaign):
+    """Semantic under-production (3 requested, model returns 1) is retried,
+    then fails loudly — a schema-valid-but-wrong-count output must not sail
+    through min_length=1 validation (live failure 2026-09-16)."""
+    from llm.structured_output import ModelOutputFailure
+    from agents.writer_agent import WriterAgent
+
+    one_post = jobj({"posts": [{"pillar": "p1", "channel": "ch_shortform",
+                                "copy": "only me", "hashtags": ["#a"]}]})
+    agent = WriterAgent(bus=make_test_bus(bus_env))
+    assignments = [
+        {"pillar": "p1", "channel": "ch_shortform"},
+        {"pillar": "p2", "channel": "ch_discussion"},
+        {"pillar": "p3", "channel": "ch_professional"},
+    ]
+    # Under-produces on every attempt -> exact-count guard must raise.
+    with pytest.raises(ModelOutputFailure):
+        await agent.draft(campaign, assignments, transport=script(one_post))
+    # Recovers on the second attempt: first returns 1 of 3, then the full set.
+    full = jobj({"posts": [
+        {"pillar": "p1", "channel": "ch_shortform", "copy": "one", "hashtags": ["#a"]},
+        {"pillar": "p2", "channel": "ch_discussion", "copy": "two", "hashtags": ["#b"]},
+        {"pillar": "p3", "channel": "ch_professional", "copy": "three", "hashtags": ["#c"]},
+    ]})
+    drafts = await agent.draft(campaign, assignments, transport=script(one_post, full))
+    assert len(drafts) == 3
+
+
 # ---------------------------------------------------------------- creative
 
 

@@ -70,9 +70,22 @@ class StrategyAgent(BaseAgent):
             return []
         try:
             store = MemoryStore()
-            return await store.retrieve_top_k(objective, channels, k=3)
+            learnings = await store.retrieve_top_k(objective, channels, k=3)
         except Exception:  # noqa: BLE001
-            return []
+            learnings = []
+        from llm.trace import append_event
+
+        append_event(
+            {
+                "event": "memory_retrieved",
+                "agent": self.name,
+                "objective": objective[:120],
+                "channels": channels,
+                "n_learnings": len(learnings),
+                "learnings": [str(l)[:300] for l in learnings],
+            }
+        )
+        return learnings
 
     async def run(
         self, campaign: Campaign, channel_profiles: list[dict], *, transport=None

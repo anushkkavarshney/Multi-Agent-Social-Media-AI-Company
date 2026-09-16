@@ -114,6 +114,39 @@ class TestQuestionCTACommentLift:
         ratio = mean_q / mean_s
         assert 1.8 < ratio < 3.5, f"comment lift ratio {ratio:.2f} outside expected 2-3x band"
 
+    def test_question_lift_is_channel_modulated_discussion_gt_professional(self):
+        """The rule-2 multiplier ITSELF must be channel-dependent (D2 audit).
+
+        Same question copy, same everything except the channel profile:
+        the discussion channel's 3.0x must beat the professional channel's
+        ratio across real engine runs — an interaction effect, not a flat
+        multiplier. This is the measurable claim the write-up makes.
+        """
+        from platform.db import _seed_channels
+        import json
+
+        profiles = {
+            c.id: json.loads(c.character_profile_json) for c in _seed_channels()
+        }
+        question = "Does cold brew actually save you money over a month?"
+        statement = "Cold brew genuinely saves you money over a month."
+
+        def _mean_ratio(channel_id: str, seed: int) -> float:
+            q = [_mk_post(copy=question, channel_id=channel_id) for _ in range(N)]
+            s = [_mk_post(copy=statement, channel_id=channel_id) for _ in range(N)]
+            rq = _simulate_many(q, seed, profiles[channel_id])
+            rs = _simulate_many(s, seed + 1000, profiles[channel_id])
+            return np.mean([r["comments"] for r in rq]) / np.mean([r["comments"] for r in rs])
+
+        r_disc = _mean_ratio("ch_discussion", SEED + 20)
+        r_pro = _mean_ratio("ch_professional", SEED + 30)
+        assert r_disc > r_pro, (
+            f"discussion lift {r_disc:.2f} must exceed professional {r_pro:.2f}"
+        )
+        # And both stay inside the documented 2-3x band.
+        assert 1.8 < r_disc < 3.5, f"discussion lift {r_disc:.2f} out of band"
+        assert 1.8 < r_pro < 3.5, f"professional lift {r_pro:.2f} out of band"
+
 
 # --------------------------------------------------------------------------
 # Rule 3 — non-linear hashtag effect

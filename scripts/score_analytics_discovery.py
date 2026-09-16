@@ -38,8 +38,8 @@ _RULES: list[dict] = [
     },
     {
         "rule": "question_cta_comment_lift",
-        "mechanism": "copy ending in '?' gets 2.5x expected comments",
-        "terms": ["question", "?", "ends in a question", "question-cta", "comments swung", "comment rate"],
+        "mechanism": "copy ending in '?' gets 2-3x expected comments, channel-modulated (discussion 3.0x > short-form 2.5x > professional 2.0x)",
+        "terms": ["question", "?", "ends in a question", "question-cta", "comments swung", "comment rate", "lift"],
         "direction": ("question", "more"),
     },
     {

@@ -182,6 +182,14 @@ async def get_weekly_analytics(
             groups.setdefault(key_fn(r), []).append(value_fn(r))
         return {k: round(_mean(v), 2) for k, v in sorted(groups.items())}
 
+    def _lift_ratio(rows: list[dict]) -> float:
+        """question/statement mean-comments ratio for one channel (None if no split)."""
+        q = [float(r["comments"]) for r in rows if r["ends_in_question"]]
+        s = [float(r["comments"]) for r in rows if not r["ends_in_question"]]
+        if not q or not s:
+            return None
+        return round(_mean(q) / _mean(s), 2)
+
     impressions_of = lambda r: float(r["impressions"])
     comments_of = lambda r: float(r["comments"])
 
@@ -200,6 +208,10 @@ async def get_weekly_analytics(
         "mean_comments_question_vs_statement": group_mean(
             lambda r: "question" if r["ends_in_question"] else "statement", comments_of
         ),
+        "mean_comments_question_lift_by_channel": {
+            ch: _lift_ratio([r for r in post_rows if r["channel_id"] == ch])
+            for ch in sorted({r["channel_id"] for r in post_rows})
+        },
         "correlations": {
             "word_count_vs_impressions": round(_pearson([r["word_count"] for r in post_rows], [impressions_of(r) for r in post_rows]), 3),
             "hashtag_count_vs_impressions": round(_pearson([r["hashtag_count"] for r in post_rows], [impressions_of(r) for r in post_rows]), 3),

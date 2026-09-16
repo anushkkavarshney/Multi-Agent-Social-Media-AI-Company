@@ -130,6 +130,8 @@ def _seed_channels() -> list[Channel]:
                 peak_multiplier=1.8,
                 # rule 3 (hashtags): reach peaks at 3-5 tags
                 hashtag_sweet_spot=(3, 5),
+                # rule 2 (question-CTA): mid-band 2.5x comment lift (doc 2-3x)
+                question_comment_lift=2.5,
             ),
         ),
         Channel(
@@ -146,6 +148,9 @@ def _seed_channels() -> list[Channel]:
                 peak_hours="07:00-10:00",
                 peak_multiplier=1.4,
                 hashtag_sweet_spot=(3, 5),
+                # rule 2: questions thrive here — STRONGEST 3.0x comment lift.
+                # The same question post on discussion outlines a professional.
+                question_comment_lift=3.0,
             ),
         ),
         Channel(
@@ -163,6 +168,8 @@ def _seed_channels() -> list[Channel]:
                 peak_hours="08:00-11:00",
                 peak_multiplier=1.5,
                 hashtag_sweet_spot=(3, 5),
+                # rule 2: credibility over conversation-starters — WEAKEST 2.0x
+                question_comment_lift=2.0,
             ),
         ),
     ]

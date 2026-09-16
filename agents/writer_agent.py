@@ -22,6 +22,8 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from agents.base_agent import BaseAgent
+from config.settings import get_settings
+from llm.structured_output import ModelOutputFailure
 from models.campaign import Campaign
 
 
@@ -85,12 +87,41 @@ class WriterAgent(BaseAgent):
         prompt += "\n\nCHANNEL ASSIGNMENTS (write exactly these posts, in order):\n" + "\n".join(
             f"- {a['pillar']} -> {a['channel']}" for a in channel_assignments
         )
-        result: PostDraftList = await self.call_model(
-            instruction=prompt,
-            schema_cls=PostDraftList,
-            transport=transport,
-            campaign_id=campaign.id,
-        )
+
+        # Exact-count guard: a schema-valid PostDraftList can still silently
+        # under-produce (live: 2026-09-16 run, 1 of 3 requested returned with
+        # min_length=1 passing validation). Count mismatch is a retryable
+        # semantic failure, not a schema one, so retry with the mismatch
+        # spelled out (bounded by the same max_structured_retries budget).
+        total_attempts = get_settings().max_structured_retries
+        for attempt in range(1, total_attempts + 1):
+            result: PostDraftList = await self.call_model(
+                instruction=prompt,
+                schema_cls=PostDraftList,
+                transport=transport,
+                campaign_id=campaign.id,
+            )
+            expected = len(channel_assignments) * posts_per_pillar
+            if len(result.posts) == expected:
+                break
+            prompt += (
+                f"\n\nIMPORTANT: You returned {len(result.posts)} post(s), but "
+                f"{expected} were requested (one per assignment line above). "
+                f"Return EXACTLY {expected} posts, one per assignment, in the "
+                f"same order as the assignments."
+            )
+        else:
+            last_raw = result.model_dump_json()
+            raise ModelOutputFailure(
+                f"{self.name} produced {len(result.posts)} posts, expected {expected}, "
+                f"after {total_attempts} attempts",
+                last_raw=last_raw,
+                last_error=(
+                    f"exact-count guard: returned {len(result.posts)} of {expected} "
+                    f"requested posts"
+                ),
+                attempts=total_attempts,
+            )
         self.log_io("output", campaign_id=campaign.id, pass_name="draft", posts=len(result.posts))
         return result.posts
 
